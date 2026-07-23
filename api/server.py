@@ -92,7 +92,7 @@ def search(q: str):
             resp = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.1, max_tokens=1024,
+                temperature=0.1, max_tokens=512,
             )
             return {
                 "title": title,
@@ -142,7 +142,7 @@ def search(q: str):
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.1, max_tokens=4096,
+            temperature=0.1, max_tokens=2048,
         )
 
         return JSONResponse({

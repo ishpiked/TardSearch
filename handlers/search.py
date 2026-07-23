@@ -72,9 +72,9 @@ def search_web_deep(query: str) -> list[dict]:
             "snippet": (snippet or "").strip(),
         })
 
-    raw = _run_with_timeout(_search_ddgs, (query,), timeout=12)
+    raw = _run_with_timeout(_search_ddgs, (query,), timeout=5)
     if raw is None:
-        raw = _run_with_timeout(_search_html, (query,), timeout=10)
+        raw = _run_with_timeout(_search_html, (query,), timeout=4)
 
     if raw:
         for r in raw:

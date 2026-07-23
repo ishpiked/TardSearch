@@ -1,10 +1,10 @@
 import os, time
 import requests
 
-MAX_RESULTS = 15
-MAX_WORKERS = 30
-TIMEOUT = 8
-ARTICLE_TEXT_LIMIT = 15000
+MAX_RESULTS = 5
+MAX_WORKERS = 10
+TIMEOUT = 5
+ARTICLE_TEXT_LIMIT = 5000
 
 REDLIB_INSTANCES = tuple(
     i.rstrip("/") for i in os.getenv(
