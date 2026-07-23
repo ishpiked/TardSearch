@@ -74,83 +74,34 @@ def search(q: str):
                 "sources_summarized": 0, "per_source_summaries": []
             }
 
-        summaries = []
-
-        def summarize_source(title, url, snippet, body):
-            prompt = (
-                f"Query: {q}\n\n"
-                f"Source: {title}\n"
-                f"URL: {url}\n"
-                f"Snippet: {snippet}\n\n"
-                f"Content:\n{body[:ARTICLE_TEXT_LIMIT]}\n\n"
-                "Extract and summarize the key information from this source "
-                "that is relevant to the query. Focus on specific facts, data, "
-                "quotes, names, dates, and evidence. Keep the summary concise "
-                "(2-4 paragraphs) but comprehensive. If the source is not "
-                "relevant, say so briefly."
-            )
-            resp = client.chat.completions.create(
-                model="llama-3.3-70b-versatile",
-                messages=[{"role": "user", "content": prompt}],
-                temperature=0.1, max_tokens=512,
-            )
-            return {
-                "title": title,
-                "url": url,
-                "summary": resp.choices[0].message.content,
-            }
-
-        with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
-            sum_futures = {}
-            for r in results:
-                body = scraped.get(r["url"])
-                if not body:
-                    continue
-                sum_futures[ex.submit(summarize_source, r["title"], r["url"], r.get("snippet", ""), body)] = r
-            for f in as_completed(sum_futures):
-                try:
-                    summaries.append(f.result())
-                except Exception:
-                    pass
-
-        if not summaries:
-            return {
-                "query": q, "answer": "Insufficient content was extracted to answer your query.",
-                "sources_discovered": len(results), "sources_scraped": len(scraped),
-                "sources_summarized": 0, "per_source_summaries": []
-            }
-
         context = "\n\n".join(
-            f"<SOURCE>{s['title']}</SOURCE>\n<URL>{s['url']}</URL>\n<SUMMARY>\n{s['summary']}\n</SUMMARY>"
-            for s in summaries
+            f"TITLE: {r['title']}\nURL: {r['url']}\nSNIPPET: {r.get('snippet', '')}\nCONTENT: {scraped.get(r['url'], '')[:ARTICLE_TEXT_LIMIT]}"
+            for r in results if r['url'] in scraped
         )
 
         prompt = (
             f"Question: {q}\n\n"
-            "Below are per-source summaries extracted from web data. "
-            "Synthesize them into a thorough, well-structured answer.\n\n"
-            "Requirements:\n"
-            "- Synthesize information across all sources, noting agreement or disagreement\n"
-            "- Include specific numbers, dates, names, locations, and concrete evidence\n"
-            "- Organize logically (chronological, thematic, or comparative)\n"
-            "- Mention any uncertainty or conflicting information\n"
-            "- Cite sources using <SOURCE> tags\n\n"
-            f"SOURCES:\n{context}\n\n"
-            "Answer:"
+            f"Below are the raw web sources:\n\n{context}\n\n"
+            "Synthesize these into a concise, thorough answer. "
+            "Include specific facts, data, and cite sources by title. "
+            "Note any uncertainty or conflicting information."
         )
 
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.1, max_tokens=2048,
+            temperature=0.1, max_tokens=1024,
         )
 
         return JSONResponse({
             "query": q,
             "sources_discovered": len(results),
             "sources_scraped": len(scraped),
-            "sources_summarized": len(summaries),
-            "per_source_summaries": summaries,
+            "sources_summarized": len(scraped),
+            "per_source_summaries": [
+                {"title": r["title"], "url": r["url"], "summary": scraped.get(r["url"], "")[:500]}
+                for r in results if r["url"] in scraped
+            ],
             "answer": response.choices[0].message.content,
         })
     except Exception as e:
