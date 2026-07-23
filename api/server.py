@@ -1,4 +1,4 @@
-from fastapi import FastAPI, APIRouter
+from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from starlette.responses import JSONResponse
 from groq import Groq
@@ -11,9 +11,16 @@ from handlers.scraper import scrape_article_deep
 from handlers.reddit import format_reddit_post_text, resolve_share_link
 from handlers.utils import extract_post_id, extract_subreddit, extract_share_link
 
-router = APIRouter(prefix=os.getenv("API_PREFIX", "/api" if os.getenv("VERCEL") else ""))
+app = FastAPI()
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["*"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
 
-@router.get("/")
+@app.get("/")
 def root():
     return {"status": "online"}
 
@@ -32,17 +39,21 @@ def fetch_content(url: str) -> str:
         return ""
     return scrape_article_deep(url)
 
-@router.get("/search")
+@app.get("/search")
 def search(q: str):
     try:
         key = os.getenv("GROQ_API_KEY")
         if not key:
-            return {"error": "missing GROQ key"}
+            return JSONResponse({"error": "missing GROQ key"}, status_code=400)
         client = Groq(api_key=key)
 
         results = search_web_deep(q)
         if not results:
-            return {"query": q, "answer": "No relevant results found for your query.", "sources_discovered": 0, "sources_scraped": 0, "sources_summarized": 0, "per_source_summaries": []}
+            return {
+                "query": q, "answer": "No relevant results found for your query.",
+                "sources_discovered": 0, "sources_scraped": 0,
+                "sources_summarized": 0, "per_source_summaries": []
+            }
 
         scraped = {}
         with ThreadPoolExecutor(max_workers=MAX_WORKERS) as ex:
@@ -57,7 +68,11 @@ def search(q: str):
                     pass
 
         if not scraped:
-            return {"query": q, "answer": "Insufficient content was extracted to answer your query.", "sources_discovered": len(results), "sources_scraped": 0, "sources_summarized": 0, "per_source_summaries": []}
+            return {
+                "query": q, "answer": "Insufficient content was extracted to answer your query.",
+                "sources_discovered": len(results), "sources_scraped": 0,
+                "sources_summarized": 0, "per_source_summaries": []
+            }
 
         summaries = []
 
@@ -77,8 +92,7 @@ def search(q: str):
             resp = client.chat.completions.create(
                 model="llama-3.3-70b-versatile",
                 messages=[{"role": "user", "content": prompt}],
-                temperature=0.1,
-                max_tokens=1024,
+                temperature=0.1, max_tokens=1024,
             )
             return {
                 "title": title,
@@ -92,15 +106,7 @@ def search(q: str):
                 body = scraped.get(r["url"])
                 if not body:
                     continue
-                sum_futures[
-                    ex.submit(
-                        summarize_source,
-                        r["title"],
-                        r["url"],
-                        r.get("snippet", ""),
-                        body,
-                    )
-                ] = r
+                sum_futures[ex.submit(summarize_source, r["title"], r["url"], r.get("snippet", ""), body)] = r
             for f in as_completed(sum_futures):
                 try:
                     summaries.append(f.result())
@@ -108,12 +114,14 @@ def search(q: str):
                     pass
 
         if not summaries:
-            return {"query": q, "answer": "Insufficient content was extracted to answer your query.", "sources_discovered": len(results), "sources_scraped": len(scraped), "sources_summarized": 0, "per_source_summaries": []}
+            return {
+                "query": q, "answer": "Insufficient content was extracted to answer your query.",
+                "sources_discovered": len(results), "sources_scraped": len(scraped),
+                "sources_summarized": 0, "per_source_summaries": []
+            }
 
         context = "\n\n".join(
-            f"<SOURCE>{s['title']}</SOURCE>\n"
-            f"<URL>{s['url']}</URL>\n"
-            f"<SUMMARY>\n{s['summary']}\n</SUMMARY>"
+            f"<SOURCE>{s['title']}</SOURCE>\n<URL>{s['url']}</URL>\n<SUMMARY>\n{s['summary']}\n</SUMMARY>"
             for s in summaries
         )
 
@@ -134,8 +142,7 @@ def search(q: str):
         response = client.chat.completions.create(
             model="llama-3.3-70b-versatile",
             messages=[{"role": "user", "content": prompt}],
-            temperature=0.1,
-            max_tokens=4096,
+            temperature=0.1, max_tokens=4096,
         )
 
         return JSONResponse({
@@ -148,13 +155,3 @@ def search(q: str):
         })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
-
-app = FastAPI()
-app.add_middleware(
-    CORSMiddleware,
-    allow_origins=["*"],
-    allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
-)
-app.include_router(router)
