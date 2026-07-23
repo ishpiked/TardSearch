@@ -20,27 +20,61 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-MODELS = [
+GROQ_MODELS = [
     "llama-3.3-70b-versatile",
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
     "llama-3.1-8b-instant",
     "qwen/qwen3.6-27b",
 ]
+CEREBRAS_MODELS = ["gemma-4-31b", "gpt-oss-120b", "zai-glm-4.7"]
+OPENROUTER_MODELS = ["poolside/laguna-xs-2.1:free", "poolside/laguna-s-2.1:free"]
 
 def _call_llm(messages, max_tokens=1024):
     key = os.getenv("GROQ_API_KEY")
-    if not key:
-        return None
-    client = Groq(api_key=key)
-    for model in MODELS:
+    if key:
+        client = Groq(api_key=key)
+        for model in GROQ_MODELS:
+            try:
+                r = client.chat.completions.create(
+                    model=model, messages=messages, temperature=0.1, max_tokens=max_tokens,
+                )
+                return r.choices[0].message.content
+            except Exception:
+                pass
+
+    cb_key = os.getenv("CEREBRAS_API_KEY")
+    if cb_key:
         try:
-            r = client.chat.completions.create(
-                model=model, messages=messages, temperature=0.1, max_tokens=max_tokens,
-            )
-            return r.choices[0].message.content
+            from cerebras.cloud.sdk import Cerebras as CerebrasClient
+            client = CerebrasClient(api_key=cb_key)
+            for model in CEREBRAS_MODELS:
+                try:
+                    r = client.chat.completions.create(
+                        model=model, messages=messages, temperature=0.1, max_tokens=max_tokens,
+                    )
+                    return r.choices[0].message.content
+                except Exception:
+                    pass
         except Exception:
             pass
+
+    or_key = os.getenv("OPENROUTER_API_KEY")
+    if or_key:
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1")
+            for model in OPENROUTER_MODELS:
+                try:
+                    r = client.chat.completions.create(
+                        model=model, messages=messages, temperature=0.1, max_tokens=max_tokens,
+                    )
+                    return r.choices[0].message.content
+                except Exception:
+                    pass
+        except Exception:
+            pass
+
     return None
 
 @app.get("/")
