@@ -2,8 +2,8 @@ import os, time
 import requests
 
 MAX_RESULTS = 15
-MAX_WORKERS = 10
-TIMEOUT = 10
+MAX_WORKERS = 30
+TIMEOUT = 8
 ARTICLE_TEXT_LIMIT = 15000
 
 REDLIB_INSTANCES = tuple(
