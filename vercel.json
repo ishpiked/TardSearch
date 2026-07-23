@@ -1,0 +1,12 @@
+{
+  "version": 2,
+  "routes": [
+    { "src": "/api/(.*)", "dest": "api/server.py" }
+  ],
+  "functions": {
+    "api/server.py": {
+      "memory": 512,
+      "maxDuration": 30
+    }
+  }
+}
