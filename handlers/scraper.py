@@ -10,7 +10,7 @@ _BAD_PARAGRAPH_RE = re.compile(
     re.I,
 )
 _NOISE = ("enable javascript", "accept cookies", "privacy policy",
-          "terms of service", "all rights reserved", "click here", "read more")
+          "terms of service", "click here")
 
 def _jsonld_payloads(soup):
     payloads = []
@@ -70,9 +70,8 @@ def _paragraphs_from(container):
     return paragraphs
 
 def _extract_body_text(soup):
-    best_parts = []
-    combined = []
-    combined_seen = set()
+    seen = set()
+    collected = []
     selectors = (
         "article", "main", "[role='main']", "[itemprop='articleBody']",
         "[data-testid='article-body']", "[data-test-id='article-body']",
@@ -86,16 +85,13 @@ def _extract_body_text(soup):
     )
     for selector in selectors:
         for el in soup.select(selector):
-            parts = _paragraphs_from(el)
-            if len(" ".join(parts)) > len(" ".join(best_parts)):
-                best_parts = parts
-            for p in parts:
+            for p in _paragraphs_from(el):
                 k = text_key(p)
-                if k and k not in combined_seen:
-                    combined_seen.add(k)
-                    combined.append(p)
-    if combined:
-        return combined if len(" ".join(combined)) >= len(" ".join(best_parts)) else best_parts
+                if k and k not in seen:
+                    seen.add(k)
+                    collected.append(p)
+    if collected:
+        return collected
     parts = []
     seen = set()
     for p in soup.find_all("p"):

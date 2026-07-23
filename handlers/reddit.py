@@ -126,7 +126,7 @@ def fetch_redlib_post(post_id: str, subreddit: str | None = None) -> dict | None
     return None
 
 def _is_block_page(html: str) -> bool:
-    if len(html) > 100000:
+    if len(html) < 200:
         return True
     if "Please wait" in html[:1000] or "checking your browser" in html[:1000]:
         return True
