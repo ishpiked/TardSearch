@@ -16,63 +16,61 @@ def expand_search_queries(query: str) -> list[str]:
         base.append(f"{q} explained")
     return base
 
-def _parse_bing(html: str) -> list[dict]:
-    results = []
-    soup = BeautifulSoup(html, "html.parser")
-    for item in soup.select("#b_results > li.b_algo, .b_algo"):
-        h2 = item.select_one("h2 a")
-        if not h2:
-            continue
-        href = h2.get("href", "")
-        title = h2.get_text(strip=True)
-        if not title or not href.startswith(("http://", "https://")):
-            continue
-        snippet_el = item.select_one(".b_caption p, .b_lineclamp2")
-        snippet = snippet_el.get_text(strip=True) if snippet_el else ""
-        results.append({"title": title[:220], "url": href, "snippet": snippet})
-    return results
-
-def _search_bing(query: str) -> list[dict]:
+def _search_ddgs(query: str) -> list[dict]:
     try:
-        r = session.get(
-            f"https://www.bing.com/search?q={urllib.parse.quote(query)}",
-            headers={"User-Agent": BROWSER, "Accept": "text/html"},
-            timeout=TIMEOUT
-        )
-        if r.status_code == 200:
-            return _parse_bing(r.text)
+        from ddgs import DDGS
+        with DDGS() as ddgs:
+            results = list(ddgs.text(query, max_results=15))
+        parsed = []
+        for r in results:
+            title = (r.get("title") or "").strip()
+            href = (r.get("href") or "").strip()
+            body = (r.get("body") or "").strip()
+            if title and href.startswith(("http://", "https://")):
+                parsed.append({"title": title[:220], "url": href, "snippet": body})
+        return parsed
     except Exception:
         pass
     return []
 
-def _parse_startpage(html: str) -> list[dict]:
+def _parse_ddg_html(html: str) -> list[dict]:
     results = []
     soup = BeautifulSoup(html, "html.parser")
-    for item in soup.select("article.result, .w-gl__result, .result, .search-result"):
-        a = item.select_one("h3 a, .result-title a, a.result-title, a")
+    for x in soup.select(".result"):
+        a = x.select_one(".result__title a") or x.select_one(".result__a")
+        s = x.select_one(".result__snippet")
         if not a:
             continue
         href = a.get("href", "")
+        real = href
+        if "uddg=" in href:
+            try:
+                parsed = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
+                real = parsed.get("uddg", [href])[0]
+            except Exception:
+                pass
         title = a.get_text(strip=True)
-        if not title or not href.startswith(("http://", "https://")):
-            continue
-        snippet_el = item.select_one(".result-description, .w-gl__description, p")
-        snippet = snippet_el.get_text(strip=True) if snippet_el else ""
-        results.append({"title": title[:220], "url": href, "snippet": snippet})
+        if title and real.startswith(("http://", "https://")):
+            results.append({
+                "title": title[:220],
+                "url": real,
+                "snippet": (s.get_text(strip=True) if s else ""),
+            })
     return results
 
-def _search_startpage(query: str) -> list[dict]:
+def _search_ddg_html(query: str) -> list[dict]:
     try:
         r = session.get(
-            f"https://www.startpage.com/sp/search?query={urllib.parse.quote(query)}",
-            headers={"User-Agent": BROWSER, "Accept": "text/html"},
-            timeout=TIMEOUT
+            f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}",
+            headers={**session.headers, **rotate_agent()}, timeout=TIMEOUT
         )
         if r.status_code == 200:
-            return _parse_startpage(r.text)
+            return _parse_ddg_html(r.text)
     except Exception:
         pass
     return []
+
+SEARCH_METHODS = [_search_ddgs, _search_ddg_html]
 
 def search_web_deep(query: str) -> list[dict]:
     candidates = []
@@ -92,13 +90,11 @@ def search_web_deep(query: str) -> list[dict]:
         })
 
     queries = expand_search_queries(query)
-    for q in queries:
-        for r in _search_bing(q):
-            add(r["title"], r["url"], r["snippet"])
-
-    if len(candidates) < 5:
+    for method in SEARCH_METHODS:
+        if len(candidates) >= 5:
+            break
         for q in queries:
-            for r in _search_startpage(q):
+            for r in method(q):
                 add(r["title"], r["url"], r["snippet"])
 
     seen_domains = set()
