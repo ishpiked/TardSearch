@@ -1,76 +1,59 @@
-from bs4 import BeautifulSoup
-import urllib.parse
-
+from concurrent.futures import ThreadPoolExecutor
 from handlers.config import session, rotate_agent, TIMEOUT, MAX_RESULTS
 from handlers.utils import url_hash
+import urllib.parse
 
-BROWSER = ("Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-           "AppleWebKit/537.36 (KHTML, like Gecko) "
-           "Chrome/120.0.0.0 Safari/537.36")
+def _run_with_timeout(fn, args=(), timeout=10):
+    with ThreadPoolExecutor(max_workers=1) as ex:
+        fut = ex.submit(fn, *args)
+        try:
+            return fut.result(timeout=timeout)
+        except Exception:
+            return None
 
-def expand_search_queries(query: str) -> list[str]:
-    q = query.strip()
-    base = [q, f"{q} news"]
-    if not q.startswith(("what", "how", "why", "who", "where", "when", "which")):
-        base.append(f"what is {q}")
-        base.append(f"{q} explained")
-    return base
-
-def _search_ddgs(query: str) -> list[dict]:
+def _search_ddgs(query: str) -> list | None:
     try:
         from ddgs import DDGS
         with DDGS() as ddgs:
-            results = list(ddgs.text(query, max_results=15))
-        parsed = []
-        for r in results:
-            title = (r.get("title") or "").strip()
-            href = (r.get("href") or "").strip()
-            body = (r.get("body") or "").strip()
-            if title and href.startswith(("http://", "https://")):
-                parsed.append({"title": title[:220], "url": href, "snippet": body})
-        return parsed
+            results = list(ddgs.text(query, max_results=MAX_RESULTS))
+        return results
     except Exception:
-        pass
-    return []
+        return None
 
-def _parse_ddg_html(html: str) -> list[dict]:
-    results = []
-    soup = BeautifulSoup(html, "html.parser")
-    for x in soup.select(".result"):
-        a = x.select_one(".result__title a") or x.select_one(".result__a")
-        s = x.select_one(".result__snippet")
-        if not a:
-            continue
-        href = a.get("href", "")
-        real = href
-        if "uddg=" in href:
-            try:
-                parsed = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
-                real = parsed.get("uddg", [href])[0]
-            except Exception:
-                pass
-        title = a.get_text(strip=True)
-        if title and real.startswith(("http://", "https://")):
-            results.append({
-                "title": title[:220],
-                "url": real,
-                "snippet": (s.get_text(strip=True) if s else ""),
-            })
-    return results
-
-def _search_ddg_html(query: str) -> list[dict]:
+def _search_html(query: str) -> list | None:
     try:
+        from bs4 import BeautifulSoup
         r = session.get(
             f"https://html.duckduckgo.com/html/?q={urllib.parse.quote(query)}",
             headers={**session.headers, **rotate_agent()}, timeout=TIMEOUT
         )
-        if r.status_code == 200:
-            return _parse_ddg_html(r.text)
+        if r.status_code != 200:
+            return None
+        soup = BeautifulSoup(r.text, "html.parser")
+        results = []
+        for x in soup.select(".result"):
+            a = x.select_one(".result__title a") or x.select_one(".result__a")
+            s = x.select_one(".result__snippet")
+            if not a:
+                continue
+            href = a.get("href", "")
+            real = href
+            if "uddg=" in href:
+                try:
+                    parsed = urllib.parse.parse_qs(urllib.parse.urlparse(href).query)
+                    real = parsed.get("uddg", [href])[0]
+                except Exception:
+                    pass
+            title = a.get_text(strip=True)
+            if title and real.startswith(("http://", "https://")):
+                results.append({
+                    "title": title[:220],
+                    "url": real,
+                    "snippet": (s.get_text(strip=True) if s else ""),
+                })
+        return results
     except Exception:
-        pass
-    return []
-
-SEARCH_METHODS = [_search_ddgs, _search_ddg_html]
+        return None
 
 def search_web_deep(query: str) -> list[dict]:
     candidates = []
@@ -89,13 +72,13 @@ def search_web_deep(query: str) -> list[dict]:
             "snippet": (snippet or "").strip(),
         })
 
-    queries = expand_search_queries(query)
-    for method in SEARCH_METHODS:
-        if len(candidates) >= 5:
-            break
-        for q in queries:
-            for r in method(q):
-                add(r["title"], r["url"], r["snippet"])
+    raw = _run_with_timeout(_search_ddgs, (query,), timeout=12)
+    if raw is None:
+        raw = _run_with_timeout(_search_html, (query,), timeout=10)
+
+    if raw:
+        for r in raw:
+            add(r.get("title"), r.get("href") or r.get("url"), r.get("body") or r.get("snippet"))
 
     seen_domains = set()
     unique = []
