@@ -20,41 +20,27 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-GROQ_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
-OPENROUTER_MODELS = [
+MODELS = [
+    "llama-3.3-70b-versatile",
     "openai/gpt-oss-120b",
     "openai/gpt-oss-20b",
+    "llama-3.1-8b-instant",
     "qwen/qwen3.6-27b",
 ]
 
 def _call_llm(messages, max_tokens=1024):
-    groq_key = os.getenv("GROQ_API_KEY")
-    for model in GROQ_MODELS:
-        if not groq_key:
-            break
+    key = os.getenv("GROQ_API_KEY")
+    if not key:
+        return None
+    client = Groq(api_key=key)
+    for model in MODELS:
         try:
-            client = Groq(api_key=groq_key)
             r = client.chat.completions.create(
                 model=model, messages=messages, temperature=0.1, max_tokens=max_tokens,
             )
             return r.choices[0].message.content
         except Exception:
             pass
-
-    or_key = os.getenv("OPENROUTER_API_KEY")
-    for model in OPENROUTER_MODELS:
-        if not or_key:
-            break
-        try:
-            from openai import OpenAI
-            client = OpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1")
-            r = client.chat.completions.create(
-                model=model, messages=messages, temperature=0.1, max_tokens=max_tokens,
-            )
-            return r.choices[0].message.content
-        except Exception:
-            pass
-
     return None
 
 @app.get("/")
