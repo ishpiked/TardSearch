@@ -20,6 +20,43 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
+GROQ_MODELS = ["llama-3.3-70b-versatile", "llama-3.1-8b-instant"]
+OPENROUTER_MODELS = [
+    "openai/gpt-oss-120b",
+    "openai/gpt-oss-20b",
+    "qwen/qwen3.6-27b",
+]
+
+def _call_llm(messages, max_tokens=1024):
+    groq_key = os.getenv("GROQ_API_KEY")
+    for model in GROQ_MODELS:
+        if not groq_key:
+            break
+        try:
+            client = Groq(api_key=groq_key)
+            r = client.chat.completions.create(
+                model=model, messages=messages, temperature=0.1, max_tokens=max_tokens,
+            )
+            return r.choices[0].message.content
+        except Exception:
+            pass
+
+    or_key = os.getenv("OPENROUTER_API_KEY")
+    for model in OPENROUTER_MODELS:
+        if not or_key:
+            break
+        try:
+            from openai import OpenAI
+            client = OpenAI(api_key=or_key, base_url="https://openrouter.ai/api/v1")
+            r = client.chat.completions.create(
+                model=model, messages=messages, temperature=0.1, max_tokens=max_tokens,
+            )
+            return r.choices[0].message.content
+        except Exception:
+            pass
+
+    return None
+
 @app.get("/")
 def root():
     return {"status": "online"}
@@ -42,11 +79,6 @@ def fetch_content(url: str) -> str:
 @app.get("/search")
 def search(q: str):
     try:
-        key = os.getenv("GROQ_API_KEY")
-        if not key:
-            return JSONResponse({"error": "missing GROQ key"}, status_code=400)
-        client = Groq(api_key=key)
-
         results = search_web_deep(q)
         if not results:
             return {
@@ -79,19 +111,19 @@ def search(q: str):
             for r in results if r['url'] in scraped
         )
 
-        prompt = (
-            f"Question: {q}\n\n"
-            f"Below are the raw web sources:\n\n{context}\n\n"
-            "Synthesize these into a concise, thorough answer. "
-            "Include specific facts, data, and cite sources by title. "
-            "Note any uncertainty or conflicting information."
+        answer = _call_llm(
+            [{"role": "user", "content": (
+                f"Question: {q}\n\n"
+                f"Below are the raw web sources:\n\n{context}\n\n"
+                "Synthesize these into a concise, thorough answer. "
+                "Include specific facts, data, and cite sources by title. "
+                "Note any uncertainty or conflicting information."
+            )}],
+            max_tokens=1024,
         )
 
-        response = client.chat.completions.create(
-            model="llama-3.3-70b-versatile",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.1, max_tokens=1024,
-        )
+        if not answer:
+            return JSONResponse({"error": "all models failed"}, status_code=500)
 
         return JSONResponse({
             "query": q,
@@ -102,7 +134,7 @@ def search(q: str):
                 {"title": r["title"], "url": r["url"], "summary": scraped.get(r["url"], "")[:500]}
                 for r in results if r["url"] in scraped
             ],
-            "answer": response.choices[0].message.content,
+            "answer": answer,
         })
     except Exception as e:
         return JSONResponse({"error": str(e)}, status_code=500)
